@@ -142,7 +142,7 @@ body.locked #lock{display:flex}body.locked .app,body.locked nav{display:none}
 
 <dialog id="dEd"><h2 id="eT">Nuevo cliente</h2>
   <label for="eN">Nombre</label><input id="eN" autocomplete="off" placeholder="Nombre y apellido">
-  <label for="eP">Teléfono (opcional)</label><input id="eP" inputmode="tel" placeholder="Ej: 343 555 0000">
+  <label for="eP">Celular para WhatsApp</label><input id="eP" inputmode="tel" placeholder="Ej: 343 5551234 (sin 0 ni 15)"><p class="leg" id="eH" style="margin:4px 0 0"></p>
   <label for="eF">Cuota mensual ($)</label><input id="eF" type="number" inputmode="decimal" min="0" placeholder="Ej: 35000">
   <label for="eV">Próximo vencimiento</label><input id="eV" type="date">
   <label>Días y horarios que entrena (tocá para marcar)</label><div id="eG"></div>
@@ -238,7 +238,7 @@ function render(){
   $('#week').innerHTML=grid(null);
   renderGroups();renderHome();renderPays();$('#names').innerHTML=clients.map(c=>`<option value="${esc(c.name)}">`).join('');
   const sum=c=>DAYS.map((d,i)=>{const hs=SCHED[i].filter(h=>c.slots.includes(k(i,h)));return hs.length?`${d} ${hs.map(hl).join(' · ')}`:''}).filter(Boolean).join('  |  ');
-  $('#clist').innerHTML=clients.length?clients.slice().sort((a,b)=>a.name.localeCompare(b.name)).map(c=>`<button class="card" data-id="${c.id}"><h3>${esc(c.name)}</h3><p>${c.slots.length?esc(sum(c)):'Sin horarios asignados'}${c.phone?' · '+esc(c.phone):''}</p></button>`).join(''):`<div class="empty">Todavía no cargaste clientes. Tocá “Nuevo cliente” y marcá los días y horarios en que entrena.</div>`;
+  $('#clist').innerHTML=clients.length?clients.slice().sort((a,b)=>a.name.localeCompare(b.name)).map(c=>`<button class="card" data-id="${c.id}"><h3>${esc(c.name)}</h3><p>${c.slots.length?esc(sum(c)):'Sin horarios asignados'}${c.phone?' · '+esc(fmtPhone(c.phone)):''}</p></button>`).join(''):`<div class="empty">Todavía no cargaste clientes. Tocá “Nuevo cliente” y marcá los días y horarios en que entrena.</div>`;
   const fr=DAYS.map((d,i)=>({d:i,hs:SCHED[i].map(h=>({h,f:CAP-at(i,h).length})).filter(x=>x.f>0)})).filter(x=>x.hs.length);
   $('#flist').innerHTML=fr.length?fr.map(x=>`<div class="card"><h3>${FULL[x.d]}</h3><div class="tags">${x.hs.map(y=>`<span class="tag">${hl(y.h)} · ${y.f} ${y.f===1?'libre':'libres'}</span>`).join('')}</div></div>`).join(''):`<div class="empty">No te quedan cupos libres esta semana.</div>`;
 }
@@ -263,9 +263,34 @@ function stat(c){if(!c.due)return{k:'none',n:9999,t:'Sin vencimiento cargado'};c
   if(n===0)return{k:'soon',n,t:'Vence hoy'};
   if(n<=7)return{k:'soon',n,t:'Vence en '+n+(n===1?' día':' días')};
   return{k:'ok',n,t:'Al día · vence '+dd(c.due)}}
-function payCard(c){const s=stat(c),ph=(c.phone||'').replace(/\D/g,'');
+function normPhone(raw){let d=String(raw||'').replace(/\D/g,'');if(!d)return'';d=d.replace(/^00/,'');
+  if(d.startsWith('54'))d=d.slice(2);
+  d=d.replace(/^0/,'');
+  if(d.startsWith('9')&&d.length===11)d=d.slice(1);
+  if(d.length===12){for(const a of [2,3,4]){if(d.slice(a,a+2)==='15'){d=d.slice(0,a)+d.slice(a+2);break}}}
+  return d.length===10?'549'+d:''}
+const savePhone=raw=>normPhone(raw)||String(raw||'').trim();
+const fmtPhone=v=>{const n=normPhone(v);return n?'+54 9 '+n.slice(3):(v||'')};
+const first=c=>c.name.split(' ')[0];
+function remindersHTML(){
+  const t=TODAY(),out=[];
+  clients.forEach(c=>{const s=stat(c);
+    if((s.k==='late'||(s.k==='soon'&&s.n<=3))&&!(c.rem&&c.rem.pay===t))
+      out.push({c,kind:'pay',val:t,lbl:s.t,txt:`Hola ${first(c)}, te escribo de RB Team: tu cuota ${s.k==='late'?'venció el ':'vence el '}${dd(c.due)}. ¿Me confirmás el pago? ¡Gracias!`})});
+  const tm=new Date();tm.setDate(tm.getDate()+1);const wd=(tm.getDay()+6)%7,tk=iso(tm);
+  if(wd<=4)clients.forEach(c=>{const hs=SCHED[wd].filter(h=>c.slots.includes(k(wd,h)));
+    if(hs.length&&!(c.rem&&c.rem.turn===tk))
+      out.push({c,kind:'turn',val:tk,lbl:'Mañana '+FULL[wd]+' '+hs.map(hl).join(' · '),txt:`Hola ${first(c)}, te recuerdo tu entrenamiento de mañana en RB Team a las ${hs.map(hl).join(' y ')}. ¡Te esperamos!`})});
+  if(!out.length)return'<div class="empty">No hay recordatorios pendientes por hoy.</div>';
+  return out.map(o=>{const ph=normPhone(o.c.phone);
+    return`<div class="li" style="align-items:center"><span><b style="color:var(--text)">${esc(o.c.name)}</b><br><small style="color:var(--mute)">${o.kind==='pay'?'Cuota · ':'Turno · '}${o.lbl}</small></span>${ph?`<a class="btn" style="padding:8px 12px;text-decoration:none" href="https://wa.me/${ph}?text=${encodeURIComponent(o.txt)}" target="_blank" rel="noopener" data-rem="${o.c.id}|${o.kind}|${o.val}">WhatsApp</a>`:'<small style="color:var(--mute)">Sin celular válido</small>'}</div>`}).join('')}
+document.addEventListener('click',e=>{const a=e.target.closest('[data-rem]');if(!a)return;
+  const[id,kind,val]=a.dataset.rem.split('|'),c=clients.find(x=>x.id===id);if(!c)return;
+  c.rem=c.rem||{};c.rem[kind]=val;save();setTimeout(render,500)});
+$('#eP').oninput=()=>{const v=$('#eP').value,n=normPhone(v);$('#eH').textContent=n?'✓ Se guardará para WhatsApp: +'+n:(v?'Revisá el número: código de área + número, sin 0 ni 15.':'')};
+function payCard(c){const s=stat(c),ph=normPhone(c.phone);
   const msg=encodeURIComponent('Hola '+c.name.split(' ')[0]+', te escribo de RB Team: tu cuota '+(c.due?(s.k==='late'?'venció el ':'vence el ')+dd(c.due):'está pendiente')+'. ¿Me confirmás el pago? ¡Gracias!');
-  return `<div class="card pc ${s.k}"><h3>${esc(c.name)}</h3><p>${s.t}${c.fee?' · '+money(c.fee)+' por mes':''}</p><div class="row" style="margin-top:10px"><button class="btn" data-pay="${c.id}">Registrar pago</button>${ph?`<a class="btn ghost" href="https://wa.me/${ph}?text=${msg}" target="_blank" rel="noopener">Avisar</a>`:''}</div></div>`}
+  return `<div class="card pc ${s.k}"><h3>${esc(c.name)}</h3><p>${s.t}${c.fee?' · '+money(c.fee)+' por mes':''}${c.rem&&c.rem.pay===TODAY()?' · Avisado hoy ✓':''}</p><div class="row" style="margin-top:10px"><button class="btn" data-pay="${c.id}">Registrar pago</button>${ph?`<a class="btn ghost" href="https://wa.me/${ph}?text=${msg}" target="_blank" rel="noopener" data-rem="${c.id}|pay|${TODAY()}">Avisar</a>`:''}</div></div>`}
 let pf='all',payC=null;
 function renderPays(){
   const L=clients.slice().sort((a,b)=>stat(a).n-stat(b).n),cnt=x=>L.filter(c=>stat(c).k===x).length;
@@ -283,6 +308,7 @@ function renderHome(){
   $('#home').innerHTML=`<div class="kpis">${kp(clients.length,'clientes')}${kp(T-occ,'cupos libres','free')}${kp(pct+'%','ocupación semanal')}${kp(late.length,'cuotas vencidas',late.length?'bad':'')}${kp(soon.length,'vencen en 7 días',soon.length?'warn':'')}${kp(money(got),'cobrado este mes')}</div>
   <div class="card"><h3>Cobranza del mes</h3><p>${money(got)} de ${money(exp)} esperados (${cp}%)</p><div class="bar"><i style="width:${cp}%"></i></div></div>
   <h2 class="sec">Ocupación por día</h2>${DAYS.map((_,d)=>{const t=SCHED[d].length*CAP,p=Math.round(occD[d]/t*100);return`<div class="od"><span>${FULL[d]}</span><div class="bar"><i style="width:${p}%"></i></div><b>${occD[d]}/${t}</b></div>`}).join('')}
+  <h2 class="sec">Recordatorios para enviar</h2>${remindersHTML()}
   <h2 class="sec">Para cobrar</h2>${due.length?due.slice(0,6).map(payCard).join('')+(due.length>6?`<p class="sub">y ${due.length-6} más en Pagos</p>`:''):'<div class="empty">No hay cuotas vencidas ni por vencer esta semana.</div>'}
   <h2 class="sec">Últimos pagos</h2>${pays.length?pays.slice(0,5).map(p=>`<div class="li"><span>${esc(p.n)} · ${dd(p.d)}</span><b>${money(p.amt)}</b></div>`).join(''):'<div class="empty">Todavía no registraste pagos.</div>'}`;
 }
@@ -314,14 +340,14 @@ function addHere(){const n=$('#cN').value.trim();if(!n){$('#cN').focus();return}
 $('#cOk').onclick=addHere;$('#cN').onkeydown=e=>{if(e.key==='Enter')addHere()};
 // editor
 function openEd(id){editing=id?clients.find(c=>c.id===id):null;draft=new Set(editing?editing.slots:[]);
-  $('#eT').textContent=editing?'Editar cliente':'Nuevo cliente';$('#eN').value=editing?editing.name:'';$('#eP').value=editing?editing.phone||'':'';
+  $('#eT').textContent=editing?'Editar cliente':'Nuevo cliente';$('#eN').value=editing?editing.name:'';$('#eP').value=editing?fmtPhone(editing.phone):'';$('#eH').textContent='';
   $('#eF').value=editing&&editing.fee?editing.fee:'';$('#eV').value=editing&&editing.due?editing.due:'';$('#eD').classList.toggle('hide',!editing);drawEd();$('#dEd').showModal()}
 function drawEd(){$('#eG').innerHTML=grid(draft);}
 // en el editor la ocupación excluye al propio cliente: se calcula con draft
 $('#eG').onclick=e=>{const b=e.target.closest('.cell');if(!b||b.disabled)return;const s=k(b.dataset.d,b.dataset.h);draft.has(s)?draft.delete(s):draft.add(s);drawEd()};
 $('#newC').onclick=()=>openEd();$('#clist').onclick=e=>{const b=e.target.closest('[data-id]');if(b)openEd(b.dataset.id)};
 $('#eS').onclick=()=>{const n=$('#eN').value.trim();if(!n){$('#eN').focus();toast('Escribí el nombre del cliente',true);return}
-  const fee=+$('#eF').value||0,due=$('#eV').value||'';if(editing){Object.assign(editing,{name:n,phone:$('#eP').value.trim(),slots:[...draft],fee,due})}else clients.push({id:uid(),name:n,phone:$('#eP').value.trim(),slots:[...draft],fee,due,pays:[]});
+  const fee=+$('#eF').value||0,due=$('#eV').value||'';if(editing){Object.assign(editing,{name:n,phone:savePhone($('#eP').value),slots:[...draft],fee,due})}else clients.push({id:uid(),name:n,phone:savePhone($('#eP').value),slots:[...draft],fee,due,pays:[]});
   save();render();$('#dEd').close();toast('Cliente guardado')};
 $('#eD').onclick=()=>{if(!confirm('¿Eliminar a '+editing.name+' y liberar sus horarios?'))return;clients=clients.filter(c=>c!==editing);save();render();$('#dEd').close();toast('Cliente eliminado',true)};
 // libres
