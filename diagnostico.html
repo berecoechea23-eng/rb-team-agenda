@@ -1,0 +1,72 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>RB Team · Diagnóstico</title>
+<style>
+:root{color-scheme:dark}
+body{margin:0;background:#050608;color:#e8edf2;font:16px/1.45 system-ui,Segoe UI,Roboto,sans-serif;padding:16px}
+.w{max-width:520px;margin:0 auto}
+h1{font-size:22px;margin:4px 0 14px}
+.r{background:#0d1117;border:1px solid #1f2a36;border-radius:10px;padding:10px 12px;margin-bottom:8px}
+.ok{border-left:4px solid #35d07f}.bad{border-left:4px solid #e5372e}.wa{border-left:4px solid #f5a623}.in{border-left:4px solid #1fa3f5}
+small{color:#8896a6;display:block;word-break:break-all}
+input{width:100%;box-sizing:border-box;background:#050608;border:1px solid #1f2a36;border-radius:8px;color:#e8edf2;padding:12px;font:inherit;margin:4px 0 10px}
+button{border:0;border-radius:8px;padding:12px 16px;font:600 16px system-ui;color:#fff;background:#0b86d6;width:100%;margin-bottom:8px}
+button.g{background:transparent;border:1px solid #1f2a36}
+label{font-size:14px;color:#8896a6}
+</style>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.110.1/dist/umd/supabase.js"></script>
+<script>window.supabase||document.write('<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.js"><\/script>')</script>
+<script src="config.js"></script>
+</head>
+<body><div class="w">
+<h1>Diagnóstico de conexión</h1>
+<div id="out"></div>
+<h1 style="margin-top:18px">Probar tu ingreso</h1>
+<label for="em">Email</label><input id="em" type="email" autocapitalize="none" autocorrect="off" spellcheck="false">
+<label for="pw">Contraseña (se muestra para que veas lo que escribís)</label><input id="pw" type="text" autocapitalize="none" autocorrect="off" spellcheck="false">
+<button id="go">Probar ingreso</button>
+<div id="res"></div>
+<button class="g" id="clr">Limpiar memoria guardada de la app</button>
+</div>
+<script>
+const out=document.getElementById('out'),res=document.getElementById('res');
+const row=(h,c,t,box)=>{const d=document.createElement('div');d.className='r '+c;d.innerHTML=h+(t?'<small>'+t+'</small>':'');(box||out).appendChild(d);return d};
+const cfg=window.RB_CONFIG||{};let sb=null;
+(async()=>{
+  const ua=navigator.userAgent,inapp=/FBAN|FBAV|Instagram|WhatsApp|Line\/|Snapchat|GSA\//.test(ua);
+  row('Navegador: '+(inapp?'<b>dentro de otra app</b>':'normal'),inapp?'wa':'ok',inapp?'Abrí el enlace en Chrome o Safari, no desde WhatsApp/Instagram.':ua.slice(0,90));
+  row(cfg.SUPABASE_URL?(/PEGA/.test(cfg.SUPABASE_URL)?'config.js: <b>sin completar</b>':'config.js: cargado'):'config.js: <b>no se pudo cargar</b>',cfg.SUPABASE_URL&&!/PEGA/.test(cfg.SUPABASE_URL)?'ok':'bad',cfg.SUPABASE_URL?cfg.SUPABASE_URL+' · clave: '+String(cfg.SUPABASE_ANON_KEY||'').slice(0,14)+'… ('+String(cfg.SUPABASE_ANON_KEY||'').length+' caracteres)':'Revisá que config.js esté subido a GitHub junto a index.html.');
+  row(window.supabase?'Librería de Supabase: cargada':'Librería de Supabase: <b>no cargó</b>',window.supabase?'ok':'bad',window.supabase?'':'Revisá tu conexión a internet.');
+  if(!cfg.SUPABASE_URL||!window.supabase)return;
+  try{
+    const r=await fetch(cfg.SUPABASE_URL.replace(/\/$/,'')+'/auth/v1/settings',{headers:{apikey:cfg.SUPABASE_ANON_KEY}});
+    const j=await r.json().catch(()=>({}));
+    if(r.ok)row('Conexión con Supabase: <b>correcta</b> (URL y clave válidas)','ok','Ingreso con email: '+(j.external&&j.external.email===false?'<b>DESACTIVADO</b>':'activado')+' · Registro de nuevos usuarios: '+(j.disable_signup?'cerrado':'abierto'));
+    else row('Conexión con Supabase: <b>error '+r.status+'</b>','bad',(j.message||j.msg||j.error_description||JSON.stringify(j)).slice(0,160)+' → la clave de config.js no es válida: copiá otra.');
+  }catch(e){row('Conexión con Supabase: <b>falló</b>','bad','No se llegó a '+cfg.SUPABASE_URL+'. Revisá que la URL esté bien escrita y tu internet. ('+e.message+')')}
+  sb=supabase.createClient(cfg.SUPABASE_URL,cfg.SUPABASE_ANON_KEY);
+})();
+document.getElementById('go').onclick=async()=>{
+  res.innerHTML='';if(!sb){row('Primero corregí lo que está en rojo arriba.','bad');return}
+  const email=document.getElementById('em').value.trim().toLowerCase(),pw=document.getElementById('pw').value;
+  if(!email||!pw){row('Escribí email y contraseña.','wa');return}
+  const{error}=await sb.auth.signInWithPassword({email,password:pw});
+  if(!error){row('<b>✓ Esos datos funcionan.</b>','ok','Si la app igual no te deja entrar, avisame: el problema estaría en la app y no en el usuario.');await sb.auth.signOut();return}
+  const c=(error.code||'')+' '+(error.message||''),l=c.toLowerCase();
+  let t='No se pudo entrar.';
+  if(l.includes('invalid_credentials')||l.includes('invalid login'))t='El email o la contraseña no coinciden, o ese usuario no existe en Supabase. Revisá Authentication > Users y creá uno con "Create new user".';
+  else if(l.includes('not_confirmed')||l.includes('not confirmed'))t='El usuario existe pero no está confirmado. En Supabase abrí el usuario y confirmalo (o creá otro con "Auto Confirm User" tildado).';
+  else if(l.includes('rate')||error.status===429)t='Demasiados intentos seguidos. Esperá 10 a 15 minutos y probá otra vez.';
+  else if(l.includes('api')&&l.includes('key'))t='La clave de config.js no es válida.';
+  else if(l.includes('fetch')||l.includes('network'))t='No hay conexión con Supabase desde este dispositivo.';
+  row('<b>'+t+'</b>','bad','Detalle técnico: '+c+' (estado '+(error.status||'?')+')');
+};
+document.getElementById('clr').onclick=async()=>{
+  try{const rs=await navigator.serviceWorker.getRegistrations();for(const r of rs)await r.unregister();const ks=await caches.keys();for(const k of ks)await caches.delete(k)}catch(e){}
+  try{localStorage.removeItem('rb_agenda');sessionStorage.clear()}catch(e){}
+  res.innerHTML='';row('Listo. Cerrá esta pestaña y abrí de nuevo la app.','ok','Se borró la copia guardada en este dispositivo (los datos reales están en Supabase).',res);
+};
+</script></body></html>
